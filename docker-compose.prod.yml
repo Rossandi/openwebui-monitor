@@ -1,0 +1,90 @@
+# Production overlay. Use together with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this adds on top of the base:
+#   - Closes Monitor and Postgres ports to the host (only reachable via the
+#     internal docker network and the Caddy reverse proxy).
+#   - Adds Caddy 2 in front (TLS via Let's Encrypt + HTTP→HTTPS redirect).
+#   - Resource limits to keep the stack predictable on shared servers.
+#   - Container log rotation (max 50 MB per file × 3 files).
+#   - Drops the jupyter sandbox by default — un-comment if Code Interpreter
+#     is used in production.
+
+services:
+  open-webui:
+    # Do NOT publish 3000 to the host — Caddy handles ingress.
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    # If your prod doesn't use Jupyter, drop that dep so the container can
+    # come up without it. Remove this section if you DO keep jupyter.
+    depends_on:
+      monitor:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  monitor:
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  postgres:
+    # Don't publish 5432. Internal network only.
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # Public ingress — TLS + automatic Let's Encrypt + HTTP→HTTPS redirect.
+  # Edit Caddyfile to put your real hostnames in.
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - monitor-net
+    depends_on:
+      - open-webui
+      - monitor
+
+  # If your production does NOT need Code Interpreter, remove this stanza
+  # entirely from the base compose, or override here to disable.
+  # The base compose enables jupyter — production usually drops it.
+  jupyter:
+    profiles: ["jupyter"]  # only starts when explicitly requested
+
+volumes:
+  caddy-data:
+  caddy-config:

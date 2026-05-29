@@ -1,0 +1,72 @@
+# Caddyfile — production HTTPS reverse proxy.
+#
+# Two public hostnames:
+#   - chat.your-company.ru      → OpenWebUI (port 8080 inside container)
+#   - monitor.your-company.ru   → Monitor   (port 8088 inside container)
+#
+# Both get a Let's Encrypt certificate automatically. Replace the placeholder
+# hostnames below with your real ones, point DNS A-records at this server,
+# open TCP 80 + 443 on the firewall — done.
+#
+# Per-source ACL is commented out below. Uncomment to restrict the Monitor
+# dashboard to office IP ranges only.
+
+{
+    # Set this to a real admin email for Let's Encrypt notifications.
+    email admin@your-company.ru
+}
+
+# ─── OpenWebUI (chat) ────────────────────────────────────────────
+chat.your-company.ru {
+    encode zstd gzip
+
+    # OpenWebUI uses WebSocket for streaming — Caddy handles ws upgrades
+    # natively under reverse_proxy.
+    reverse_proxy open-webui:8080 {
+        # Pass through real client IP
+        header_up X-Real-IP {http.request.remote.host}
+        header_up X-Forwarded-For {http.request.remote.host}
+    }
+
+    # Basic hardening headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    log {
+        output file /var/log/caddy/chat-access.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
+}
+
+# ─── Monitor (admin dashboard) ───────────────────────────────────
+monitor.your-company.ru {
+    encode zstd gzip
+
+    # OPTIONAL: restrict to internal IPs only. Uncomment + edit:
+    # @blocked not remote_ip 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
+    # respond @blocked "403 Forbidden — admin access only" 403
+
+    reverse_proxy monitor:8088
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+    }
+
+    log {
+        output file /var/log/caddy/monitor-access.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+    }
+}
+
+# ─── HTTP → HTTPS redirect (Caddy does this automatically; this block is
+#     left here as documentation only) ─────────────────────────────

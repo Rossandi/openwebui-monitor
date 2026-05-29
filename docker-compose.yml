@@ -1,0 +1,144 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    environment:
+      # --- Блок 0: Debug-логирование (временно, для диагностики) ---
+      - GLOBAL_LOG_LEVEL=DEBUG
+      # --- Блок 1: Чат-модели через OpenRouter (через Monitor-прокси) ---
+      # ВНИМАНИЕ: запросы идут в Monitor /v1/*, который проксирует в OpenRouter.
+      # Это даёт возможность ловить X-Generation-Id всех tool-call rounds.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_API_BASE_URL=http://monitor:8088/v1
+      - ENABLE_OPENAI_API=true
+      - ENABLE_OLLAMA_API=false
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-secret-change-me}
+      # --- Блок 2: Генерация картинок через OpenRouter (тоже через прокси) ---
+      - ENABLE_IMAGE_GENERATION=true
+      - IMAGE_GENERATION_ENGINE=openai
+      - IMAGES_OPENAI_API_BASE_URL=http://monitor:8088/v1
+      - IMAGES_OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - IMAGE_GENERATION_MODEL=${IMAGE_GENERATION_MODEL:-openai/dall-e-3}
+      - IMAGE_SIZE=${IMAGE_SIZE:-1024x1024}
+      # --- Блок 3: Фикс ошибки "Chunk too big" (нужно для Gemini Flash Image) ---
+      - CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE=20971520
+      - ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION=true
+      # --- Блок 4: Веб-поиск через Tavily ---
+      - ENABLE_WEB_SEARCH=true
+      - WEB_SEARCH_ENGINE=tavily
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # --- Блок 4b: Качество Tavily-поиска ---
+      - WEB_SEARCH_RESULT_COUNT=5
+      - WEB_SEARCH_CONCURRENT_REQUESTS=5
+      - WEB_LOADER_ENGINE=tavily
+      - TAVILY_EXTRACT_DEPTH=advanced
+      - BYPASS_WEB_SEARCH_WEB_LOADER=false
+      - BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=true
+      - WEB_LOADER_TIMEOUT=20
+      # --- Блок 4c: Отключаем локальные ML-модели (embedding/STT) ---
+      # Без этого OWUI на старте качает ~500 МБ с HuggingFace и падает по healthcheck.
+      # RAG (база знаний из документов) при этом работать не будет — нам сейчас не нужно.
+      - RAG_EMBEDDING_ENGINE=openai
+      - RAG_EMBEDDING_MODEL=text-embedding-3-small
+      - AUDIO_STT_ENGINE=openai
+      - BYPASS_EMBEDDING_AND_RETRIEVAL=true
+      # --- Блок 5: Code Execution и Code Interpreter (Jupyter sandbox) ---
+      - ENABLE_CODE_EXECUTION=true
+      - CODE_EXECUTION_ENGINE=jupyter
+      - CODE_EXECUTION_JUPYTER_URL=http://jupyter:8888
+      - CODE_EXECUTION_JUPYTER_AUTH=token
+      - CODE_EXECUTION_JUPYTER_AUTH_TOKEN=${JUPYTER_TOKEN:-}
+      - CODE_EXECUTION_JUPYTER_TIMEOUT=120
+      - ENABLE_CODE_INTERPRETER=true
+      - CODE_INTERPRETER_ENGINE=jupyter
+      - CODE_INTERPRETER_JUPYTER_URL=http://jupyter:8888
+      - CODE_INTERPRETER_JUPYTER_AUTH=token
+      - CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=${JUPYTER_TOKEN:-}
+      - CODE_INTERPRETER_JUPYTER_TIMEOUT=120
+    volumes:
+      - open-webui-data:/app/backend/data
+      - ./templates:/app/backend/data/templates:ro
+    depends_on:
+      - monitor
+      - jupyter
+    networks:
+      - monitor-net
+    restart: unless-stopped
+
+  monitor:
+    build: .
+    container_name: monitor
+    ports:
+      - "${MONITOR_PORT:-8088}:8088"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://owmonitor:${POSTGRES_PASSWORD:-owmonitor}@postgres:5432/owmonitor
+      - PORT=8088
+      # Для sync-воркера: ключ OpenRouter и базовый URL
+      - OPENROUTER_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_BASE=https://openrouter.ai/api/v1
+    volumes:
+      - ./data:/app/data
+      - ./model_pricing.json:/app/model_pricing.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - monitor-net
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=owmonitor
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-owmonitor}
+      - POSTGRES_DB=owmonitor
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U owmonitor -d owmonitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - monitor-net
+    restart: unless-stopped
+
+  jupyter:
+    build: ./jupyter-sandbox
+    container_name: owui-jupyter
+    # Наружу не публикуем — доступ только из сети monitor-net.
+    expose:
+      - "8888"
+    environment:
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-}
+    command:
+      - start-notebook.sh
+      - --NotebookApp.token=${JUPYTER_TOKEN}
+      - --NotebookApp.password=
+      - --NotebookApp.allow_origin=*
+      - --NotebookApp.disable_check_xsrf=True
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    volumes:
+      - jupyter-work:/home/jovyan/work
+      - jupyter-tmp:/tmp
+      - ./templates:/home/jovyan/templates:ro
+    networks:
+      - monitor-net
+    restart: unless-stopped
+
+networks:
+  monitor-net:
+    driver: bridge
+
+volumes:
+  open-webui-data:
+  jupyter-work:
+  jupyter-tmp:
+  postgres-data:

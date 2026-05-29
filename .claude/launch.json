@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "monitor-ui",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "exit", "0"],
+      "port": 8088
+    }
+  ]
+}

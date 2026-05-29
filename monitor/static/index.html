@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>OWI Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root[data-theme="dark"] {
+  --bg: #0f0f0f;
+  --sidebar: #171717;
+  --card: #1e1e1e;
+  --border: rgba(255,255,255,0.08);
+  --text: #ececec;
+  --text-muted: #8e8ea0;
+  --hover: rgba(255,255,255,0.04);
+  --grid: rgba(255,255,255,0.06);
+}
+:root[data-theme="light"] {
+  --bg: #f9f9f9;
+  --sidebar: #ffffff;
+  --card: #ffffff;
+  --border: rgba(0,0,0,0.08);
+  --text: #0f0f0f;
+  --text-muted: #6b7280;
+  --hover: rgba(0,0,0,0.04);
+  --grid: rgba(0,0,0,0.06);
+}
+:root { --accent: #6366f1; }
+
+.round-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.provider-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.log-row.is-group td:first-child { padding-left: 4px; }
+.rounds-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 16px;
+  font-size: 12px;
+}
+.rounds-table th, .rounds-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.rounds-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  background: var(--hover);
+}
+.rounds-table td { font-variant-numeric: tabular-nums; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; transition: background 150ms ease, color 150ms ease; }
+a { color: inherit; text-decoration: none; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+.app { display: flex; height: 100vh; }
+.sidebar {
+  width: 240px; background: var(--sidebar); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 16px 12px; flex-shrink: 0;
+}
+.brand { display:flex; align-items:center; gap:10px; padding: 8px 12px 20px; }
+.brand-logo { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), #8b5cf6); display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:14px; }
+.brand-title { font-weight: 600; font-size: 15px; }
+.nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-item {
+  display:flex; align-items:center; gap:10px; padding: 10px 14px; border-radius: 9999px;
+  cursor: pointer; color: var(--text-muted); transition: background 150ms ease, color 150ms ease;
+  font-weight: 500;
+}
+.nav-item:hover { background: var(--hover); color: var(--text); }
+.nav-item.active { background: var(--accent); color: white; }
+.nav-icon { width: 18px; height: 18px; display:inline-flex; align-items:center; justify-content:center; }
+.sidebar-bottom { margin-top: auto; padding: 8px; }
+.theme-toggle {
+  width: 100%; padding: 10px 14px; border-radius: 9999px; border: 1px solid var(--border);
+  background: transparent; color: var(--text); cursor: pointer; font-family: inherit; font-size: 13px;
+  transition: background 150ms ease;
+}
+.theme-toggle:hover { background: var(--hover); }
+
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 28px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.page-title { font-size: 18px; font-weight: 600; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.period-tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); padding: 4px; border-radius: 9999px; }
+.period-tab {
+  padding: 6px 14px; border-radius: 9999px; cursor: pointer; font-size: 13px;
+  color: var(--text-muted); transition: all 150ms ease; border: none; background: transparent; font-family: inherit;
+}
+.period-tab:hover { color: var(--text); }
+.period-tab.active { background: var(--accent); color: white; }
+.refresh-btn {
+  padding: 8px 14px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card);
+  color: var(--text); cursor: pointer; font-family: inherit; font-size: 13px; transition: all 150ms ease;
+}
+.refresh-btn:hover { background: var(--hover); }
+.refresh-btn.on { border-color: var(--accent); color: var(--accent); }
+
+.content { flex: 1; overflow-y: auto; padding: 24px 28px; }
+
+.cards-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 20px; transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.card-icon { width: 36px; height: 36px; border-radius: 10px; background: rgba(99,102,241,0.12); color: var(--accent); display:flex; align-items:center; justify-content:center; margin-bottom: 12px; }
+.card-value { font-size: 26px; font-weight: 700; }
+.card-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.chart-title { font-weight: 600; margin-bottom: 12px; font-size: 14px; }
+.chart-card canvas { max-height: 260px; }
+
+.filter-bar {
+  display: flex; gap: 10px; flex-wrap: wrap; padding: 16px; background: var(--card);
+  border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;
+}
+.filter-bar input, .filter-bar select {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-family: inherit; font-size: 13px;
+  transition: border-color 150ms ease;
+}
+.filter-bar input:focus, .filter-bar select:focus { outline: none; border-color: var(--accent); }
+.btn {
+  padding: 8px 16px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card);
+  color: var(--text); cursor: pointer; font-family: inherit; font-size: 13px; transition: all 150ms ease;
+}
+.btn:hover { background: var(--hover); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+.btn-primary:hover { background: #5558e3; }
+
+.table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left; padding: 12px 16px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border);
+}
+tbody td { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+tbody tr { cursor: pointer; transition: background 150ms ease; }
+tbody tr:hover { background: var(--hover); }
+tbody tr:last-child td { border-bottom: none; }
+.empty { padding: 48px; text-align: center; color: var(--text-muted); font-size: 14px; }
+
+.truncate { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); opacity: 0; pointer-events: none;
+  transition: opacity 200ms ease; z-index: 50;
+}
+.backdrop.open { opacity: 1; pointer-events: auto; }
+.detail-panel {
+  position: fixed; top: 0; right: 0; height: 100vh; width: 480px; background: var(--sidebar);
+  border-left: 1px solid var(--border); transform: translateX(100%); transition: transform 250ms ease;
+  z-index: 60; display: flex; flex-direction: column;
+}
+.detail-panel.open { transform: translateX(0); }
+.detail-head { display:flex; justify-content:space-between; align-items:center; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.detail-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.close-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 22px; padding: 4px 10px; border-radius: 8px; }
+.close-btn:hover { background: var(--hover); color: var(--text); }
+.detail-body { flex: 1; overflow-y: auto; padding: 20px 22px; }
+.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-bottom: 20px; }
+.meta-item .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.meta-item .value { font-size: 13px; font-weight: 500; word-break: break-word; }
+.section-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 18px 0 8px; }
+pre.codeblock {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  font-family: 'Menlo', 'Monaco', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;
+  max-height: 360px; overflow-y: auto; color: var(--text);
+}
+details.context-block { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+details.context-block summary { cursor: pointer; font-size: 12px; color: var(--text-muted); }
+.ctx-msg { margin-top: 10px; padding: 8px; border-radius: 6px; background: var(--card); }
+.ctx-role { font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.ctx-content { font-size: 12px; word-wrap: break-word; }
+
+.reasoning-block {
+  background: var(--hover); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+  padding: 8px 12px; margin-bottom: 8px; font-size: 12px; color: var(--text-muted);
+}
+.reasoning-block summary {
+  cursor: pointer; font-size: 11px; font-weight: 600; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.reasoning-block .reasoning-text {
+  margin-top: 6px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5;
+  font-style: italic;
+}
+
+.pager { display:flex; justify-content: space-between; align-items:center; padding: 12px 16px; color: var(--text-muted); font-size: 12px; }
+.pager-buttons { display:flex; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div class="brand-title">OWI Monitor</div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-page="dashboard"><span class="nav-icon">▦</span>Dashboard</div>
+      <div class="nav-item" data-page="logs"><span class="nav-icon">≡</span>Request Log</div>
+      <div class="nav-item" data-page="users"><span class="nav-icon">◉</span>By User</div>
+      <div class="nav-item" data-page="models"><span class="nav-icon">◈</span>By Model</div>
+    </nav>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" id="lang-toggle" style="margin-bottom:8px;">🌐 Русский</button>
+      <button class="theme-toggle" id="theme-toggle">☾ Dark mode</button>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="page-title" id="page-title">Dashboard</div>
+      <div class="topbar-right">
+        <div class="period-tabs" id="period-tabs">
+          <button class="period-tab" data-period="today">Today</button>
+          <button class="period-tab" data-period="week">Week</button>
+          <button class="period-tab" data-period="month">Month</button>
+          <button class="period-tab active" data-period="all">All time</button>
+        </div>
+        <button class="refresh-btn on" id="refresh-toggle">⟳ Auto 30s</button>
+      </div>
+    </div>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="detail-panel" id="detail-panel">
+  <div class="detail-head">
+    <h3>Request Detail</h3>
+    <button class="close-btn" id="close-detail">×</button>
+  </div>
+  <div class="detail-body" id="detail-body"></div>
+</aside>
+
+<script>
+const i18n = {
+  en: {
+    dashboard: 'Dashboard', logs: 'Request Log', users: 'By User', models: 'By Model',
+    today: 'Today', week: 'Week', month: 'Month', all: 'All time',
+    auto30: '⟳ Auto 30s', manual: '⟳ Manual',
+    darkMode: '☾ Dark mode', lightMode: '☀ Light mode',
+    totalRequests: 'Total Requests', totalTokens: 'Total Tokens',
+    estimatedCost: 'Estimated Cost', activeUsers: 'Active Users',
+    reqPerDay: 'Requests per day (30d)', tokPerDay: 'Tokens per day (30d)',
+    chartReq: 'Requests', chartInput: 'Input', chartOutput: 'Output',
+    allUsers: 'All users', allModels: 'All models', searchPlaceholder: 'Search prompts/responses...',
+    apply: 'Apply', reset: 'Reset',
+    thTime: 'Time', thUser: 'User', thModel: 'Model', thPrompt: 'Prompt',
+    thIn: 'In', thOut: 'Out', thCost: 'Cost', thLatency: 'Latency',
+    total: 'Total', page: 'Page', prev: 'Prev', next: 'Next',
+    noData: 'No data yet',
+    requestDetail: 'Request Detail',
+    user: 'User', email: 'Email', model: 'Model', time: 'Time',
+    latency: 'Latency', tokens: 'Tokens', cost: 'Cost',
+    userPrompt: 'User Prompt', fullContext: 'Full Context',
+    assistantResponse: 'Assistant Response', messages: 'message(s)',
+    thEmail: 'Email', thRequests: 'Requests', thInput: 'Input', thOutput: 'Output', thTotalCost: 'Total Cost',
+    thAvgLatency: 'Avg Latency',
+    langBtn: '🌐 Русский',
+  },
+  ru: {
+    dashboard: 'Дашборд', logs: 'Журнал запросов', users: 'По пользователям', models: 'По моделям',
+    today: 'Сегодня', week: 'Неделя', month: 'Месяц', all: 'Всё время',
+    auto30: '⟳ Авто 30с', manual: '⟳ Вручную',
+    darkMode: '☾ Тёмная тема', lightMode: '☀ Светлая тема',
+    totalRequests: 'Всего запросов', totalTokens: 'Всего токенов',
+    estimatedCost: 'Стоимость', activeUsers: 'Активных пользователей',
+    reqPerDay: 'Запросов в день (30д)', tokPerDay: 'Токенов в день (30д)',
+    chartReq: 'Запросы', chartInput: 'Входящие', chartOutput: 'Исходящие',
+    allUsers: 'Все пользователи', allModels: 'Все модели', searchPlaceholder: 'Поиск по промтам/ответам...',
+    apply: 'Применить', reset: 'Сбросить',
+    thTime: 'Время', thUser: 'Пользователь', thModel: 'Модель', thPrompt: 'Промт',
+    thIn: 'Вход', thOut: 'Выход', thCost: 'Цена', thLatency: 'Задержка',
+    total: 'Всего', page: 'Стр.', prev: 'Назад', next: 'Вперёд',
+    noData: 'Нет данных',
+    requestDetail: 'Детали запроса',
+    user: 'Пользователь', email: 'Email', model: 'Модель', time: 'Время',
+    latency: 'Задержка', tokens: 'Токены', cost: 'Стоимость',
+    userPrompt: 'Промт пользователя', fullContext: 'Полный контекст',
+    assistantResponse: 'Ответ модели', messages: 'сообщ.',
+    thEmail: 'Email', thRequests: 'Запросы', thInput: 'Входящие', thOutput: 'Исходящие', thTotalCost: 'Общая стоимость',
+    thAvgLatency: 'Ср. задержка',
+    langBtn: '🌐 English',
+  }
+};
+function t(key) { return i18n[state.lang][key] || key; }
+
+const state = {
+  page: 'dashboard',
+  period: 'all',
+  lang: localStorage.getItem('owim-lang') || 'ru',
+  autoRefresh: true,
+  refreshTimer: null,
+  charts: {},
+  logFilters: { page: 1, limit: 50, user_email: '', model: '', search: '', date_from: '', date_to: '' },
+};
+
+const fmt = {
+  num: n => (n||0).toLocaleString('en-US'),
+  // USD with cents — 4 decimals for small amounts, 6 for sub-cent values
+  cost: n => {
+    n = n || 0;
+    if (n === 0) return '$0.00';
+    if (Math.abs(n) < 0.0001) return '$' + n.toFixed(6);
+    return '$' + n.toFixed(4);
+  },
+  time: ts => ts ? new Date(ts+'Z').toLocaleString('ru-RU', {timeZone:'Europe/Moscow', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '',
+  esc: s => (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+  formatContent: s => {
+    if (!s) return '';
+    const re = /<details\s+type=["'](reasoning|thinking)["'][^>]*>\s*<summary>([\s\S]*?)<\/summary>\s*([\s\S]*?)<\/details>/g;
+    let last = 0, out = '';
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const before = s.slice(last, m.index);
+      if (before.trim()) out += `<pre class="codeblock">${fmt.esc(before)}</pre>`;
+      const summary = m[2].trim();
+      const body = m[3].replace(/^&gt;\s?/gm, '').replace(/^>\s?/gm, '').trim();
+      out += `<details class="reasoning-block" open><summary>\u{1F4AD} ${fmt.esc(summary)}</summary><div class="reasoning-text">${fmt.esc(body)}</div></details>`;
+      last = m.index + m[0].length;
+    }
+    const after = s.slice(last);
+    if (after.trim()) out += `<pre class="codeblock">${fmt.esc(after)}</pre>`;
+    return out || `<pre class="codeblock">${fmt.esc(s)}</pre>`;
+  },
+};
+
+async function api(path) {
+  try {
+    const r = await fetch(path);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) { return null; }
+}
+
+// LANG
+function applyLang() {
+  localStorage.setItem('owim-lang', state.lang);
+  document.getElementById('lang-toggle').textContent = t('langBtn');
+  // update nav labels
+  const navMap = {dashboard:'dashboard', logs:'logs', users:'users', models:'models'};
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const icon = el.querySelector('.nav-icon').outerHTML;
+    el.innerHTML = icon + t(navMap[el.dataset.page]);
+  });
+  // update period tabs
+  const periodMap = {today:'today', week:'week', month:'month', all:'all'};
+  document.querySelectorAll('.period-tab').forEach(el => {
+    el.textContent = t(periodMap[el.dataset.period]);
+  });
+  // update page title
+  const pageTitleMap = {dashboard:'dashboard', logs:'logs', users:'users', models:'models'};
+  document.getElementById('page-title').textContent = t(pageTitleMap[state.page]);
+  // update buttons
+  const cur = document.documentElement.getAttribute('data-theme');
+  document.getElementById('theme-toggle').textContent = cur === 'dark' ? t('darkMode') : t('lightMode');
+  document.getElementById('refresh-toggle').textContent = state.autoRefresh ? t('auto30') : t('manual');
+  document.getElementById('detail-panel').querySelector('h3').textContent = t('requestDetail');
+}
+document.getElementById('lang-toggle').onclick = () => {
+  state.lang = state.lang === 'en' ? 'ru' : 'en';
+  applyLang();
+  render();
+};
+
+// THEME
+function applyTheme(th) {
+  document.documentElement.setAttribute('data-theme', th);
+  localStorage.setItem('owim-theme', th);
+  document.getElementById('theme-toggle').textContent = th === 'dark' ? t('darkMode') : t('lightMode');
+  if (state.page === 'dashboard') renderDashboard();
+}
+document.getElementById('theme-toggle').onclick = () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+};
+applyTheme(localStorage.getItem('owim-theme') || 'dark');
+
+// NAV
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.onclick = () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    el.classList.add('active');
+    state.page = el.dataset.page;
+    document.getElementById('page-title').textContent = t({dashboard:'dashboard',logs:'logs',users:'users',models:'models'}[state.page]);
+    render();
+  };
+});
+
+// PERIOD
+document.querySelectorAll('.period-tab').forEach(el => {
+  el.onclick = () => {
+    document.querySelectorAll('.period-tab').forEach(n => n.classList.remove('active'));
+    el.classList.add('active');
+    state.period = el.dataset.period;
+    render();
+  };
+});
+
+// REFRESH
+const refreshBtn = document.getElementById('refresh-toggle');
+function setupRefresh() {
+  if (state.refreshTimer) { clearInterval(state.refreshTimer); state.refreshTimer = null; }
+  if (state.autoRefresh) state.refreshTimer = setInterval(render, 30000);
+}
+refreshBtn.onclick = () => {
+  state.autoRefresh = !state.autoRefresh;
+  refreshBtn.classList.toggle('on', state.autoRefresh);
+  refreshBtn.textContent = state.autoRefresh ? '⟳ Auto 30s' : '⟳ Manual';
+  setupRefresh();
+};
+setupRefresh();
+
+// RENDER ROUTER
+function render() {
+  if (state.page === 'dashboard') renderDashboard();
+  else if (state.page === 'logs') renderLogs();
+  else if (state.page === 'users') renderByUser();
+  else if (state.page === 'models') renderByModel();
+}
+
+// DASHBOARD
+async function renderDashboard() {
+  const content = document.getElementById('content');
+  const [summary, timeline] = await Promise.all([
+    api('/api/stats/summary?period=' + state.period),
+    api('/api/stats/timeline?days=30'),
+  ]);
+  const s = summary || { total_requests: 0, total_tokens: 0, cost_usd: 0, active_users: 0 };
+  content.innerHTML = `
+    <div class="cards-row">
+      <div class="card"><div class="card-icon">≡</div><div class="card-value">${fmt.num(s.total_requests)}</div><div class="card-label">${t('totalRequests')}</div></div>
+      <div class="card"><div class="card-icon">⌬</div><div class="card-value">${fmt.num(s.total_tokens)}</div><div class="card-label">${t('totalTokens')}</div></div>
+      <div class="card"><div class="card-icon">$</div><div class="card-value">${fmt.cost(s.cost_usd)}</div><div class="card-label">${t('estimatedCost')}</div></div>
+      <div class="card"><div class="card-icon">◉</div><div class="card-value">${fmt.num(s.active_users)}</div><div class="card-label">${t('activeUsers')}</div></div>
+    </div>
+    <div class="charts-row">
+      <div class="chart-card"><div class="chart-title">${t('reqPerDay')}</div><canvas id="chart-req"></canvas></div>
+      <div class="chart-card"><div class="chart-title">${t('tokPerDay')}</div><canvas id="chart-tok"></canvas></div>
+    </div>
+  `;
+  const tl = timeline || [];
+  drawChart('chart-req', tl.map(d=>d.date), [{label:t('chartReq'), data: tl.map(d=>d.requests)}]);
+  drawChart('chart-tok', tl.map(d=>d.date), [
+    {label:t('chartInput'), data: tl.map(d=>d.input_tokens)},
+    {label:t('chartOutput'), data: tl.map(d=>d.output_tokens)},
+  ]);
+}
+
+function drawChart(id, labels, datasets) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  const css = getComputedStyle(document.documentElement);
+  const text = css.getPropertyValue('--text-muted').trim();
+  const grid = css.getPropertyValue('--grid').trim();
+  const accent = css.getPropertyValue('--accent').trim();
+  const palette = [accent, '#8b5cf6'];
+  const cfgDatasets = datasets.map((d,i) => ({
+    label: d.label, data: d.data, borderColor: palette[i%palette.length],
+    backgroundColor: 'transparent', tension: 0.35, pointRadius: 0, borderWidth: 2,
+  }));
+  if (state.charts[id]) state.charts[id].destroy();
+  state.charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: cfgDatasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: text, font: { family: 'Inter' } } } },
+      scales: {
+        x: { ticks: { color: text, maxTicksLimit: 8 }, grid: { color: grid } },
+        y: { ticks: { color: text }, grid: { color: grid }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+// LOGS
+async function renderLogs() {
+  const content = document.getElementById('content');
+  const [users, models] = await Promise.all([api('/api/users'), api('/api/models')]);
+  const f = state.logFilters;
+  content.innerHTML = `
+    <div class="filter-bar">
+      <input type="date" id="f-from" value="${f.date_from}">
+      <input type="date" id="f-to" value="${f.date_to}">
+      <select id="f-user"><option value="">${t('allUsers')}</option>${(users||[]).map(u=>`<option value="${fmt.esc(u.email)}" ${u.email===f.user_email?'selected':''}>${fmt.esc(u.name||u.email)}</option>`).join('')}</select>
+      <select id="f-model"><option value="">${t('allModels')}</option>${(models||[]).map(m=>`<option value="${fmt.esc(m)}" ${m===f.model?'selected':''}>${fmt.esc(m)}</option>`).join('')}</select>
+      <input type="text" id="f-search" placeholder="${t('searchPlaceholder')}" value="${fmt.esc(f.search)}" style="flex:1; min-width:200px;">
+      <button class="btn" id="f-apply">${t('apply')}</button>
+      <button class="btn" id="f-reset">${t('reset')}</button>
+    </div>
+    <div class="table-wrap" id="logs-table"></div>
+  `;
+  document.getElementById('f-apply').onclick = () => {
+    f.page = 1;
+    f.date_from = document.getElementById('f-from').value;
+    f.date_to = document.getElementById('f-to').value;
+    f.user_email = document.getElementById('f-user').value;
+    f.model = document.getElementById('f-model').value;
+    f.search = document.getElementById('f-search').value;
+    loadLogs();
+  };
+  document.getElementById('f-reset').onclick = () => {
+    state.logFilters = { page: 1, limit: 50, user_email: '', model: '', search: '', date_from: '', date_to: '' };
+    renderLogs();
+  };
+  loadLogs();
+}
+
+async function loadLogs() {
+  const f = state.logFilters;
+  const params = new URLSearchParams({ page: f.page, limit: f.limit });
+  ['user_email','model','search'].forEach(k => { if (f[k]) params.set(k, f[k]); });
+  const data = await api('/api/logs?' + params.toString());
+  const wrap = document.getElementById('logs-table');
+  if (!data || !data.items.length) {
+    wrap.innerHTML = '<div class="empty">' + t('noData') + '</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th style="width:30px"></th>
+        <th>${t('thTime')}</th><th>${t('thUser')}</th><th>${t('thModel')}</th><th>${t('thPrompt')}</th>
+        <th>${t('thIn')}</th><th>${t('thOut')}</th><th>${t('thCost')}</th><th>${t('thLatency')}</th>
+      </tr></thead>
+      <tbody>${data.items.map(r => {
+        const isGroup = r.rounds_count > 1;
+        const providers = (r.providers || []).join(', ');
+        return `
+        <tr data-rid="${fmt.esc(r.group_key)}" class="log-row${isGroup?' is-group':''}">
+          <td class="expand-cell">${isGroup ? `<span class="round-badge" title="${r.rounds_count} rounds">${r.rounds_count}×</span>` : ''}</td>
+          <td>${fmt.time(r.timestamp)}</td>
+          <td>${fmt.esc(r.user_name||r.user_email||'(unknown)')}</td>
+          <td>${fmt.esc(r.model||'')}${providers?` <span class="provider-chip">${fmt.esc(providers)}</span>`:''}</td>
+          <td class="truncate">${fmt.esc(r.prompt_preview||(r.has_prompt?'':'(no prompt — Image Studio?)'))}</td>
+          <td>${fmt.num(r.input_tokens)}</td>
+          <td>${fmt.num(r.output_tokens)}</td>
+          <td><strong>${fmt.cost(r.cost_usd)}</strong></td>
+          <td>${fmt.num(r.generation_time_ms)} ms</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>
+    <div class="pager">
+      <div>${t('total')}: ${data.total} · ${t('page')} ${data.page}</div>
+      <div class="pager-buttons">
+        <button class="btn" id="prev">${t('prev')}</button>
+        <button class="btn" id="next">${t('next')}</button>
+      </div>
+    </div>
+  `;
+  wrap.querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => openDetail(tr.dataset.rid));
+  document.getElementById('prev').onclick = () => { if (state.logFilters.page>1){state.logFilters.page--; loadLogs();} };
+  document.getElementById('next').onclick = () => {
+    if (state.logFilters.page * state.logFilters.limit < data.total) { state.logFilters.page++; loadLogs(); }
+  };
+}
+
+// DETAIL PANEL
+async function openDetail(requestId) {
+  const d = await api('/api/logs/' + encodeURIComponent(requestId));
+  if (!d) return;
+  const p = d.prompt || {};
+  const providers = (d.providers || []).join(', ');
+  const lastUserMsg = (function() {
+    const msgs = p.messages || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.role === 'user') {
+        if (typeof m.content === 'string') return m.content;
+        if (Array.isArray(m.content)) return m.content.filter(x=>x && x.type==='text').map(x=>x.text||'').join('\n');
+      }
+    }
+    return '';
+  })();
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="meta-grid">
+      <div class="meta-item"><div class="label">${t('user')}</div><div class="value">${fmt.esc(p.user_name||'(unknown)')}</div></div>
+      <div class="meta-item"><div class="label">${t('email')}</div><div class="value">${fmt.esc(p.user_email||'')}</div></div>
+      <div class="meta-item"><div class="label">${t('model')}</div><div class="value">${fmt.esc(d.model||'')}</div></div>
+      <div class="meta-item"><div class="label">Provider</div><div class="value">${fmt.esc(providers)}</div></div>
+      <div class="meta-item"><div class="label">${t('time')}</div><div class="value">${fmt.time(d.timestamp)}</div></div>
+      <div class="meta-item"><div class="label">Rounds</div><div class="value">${d.rounds_count}× (tool-calling${d.rounds_count > 1 ? ' chain' : ''})</div></div>
+      <div class="meta-item"><div class="label">${t('tokens')}</div><div class="value">${fmt.num(d.input_tokens)} in / ${fmt.num(d.output_tokens)} out${d.reasoning_tokens?' · '+fmt.num(d.reasoning_tokens)+' reasoning':''}</div></div>
+      <div class="meta-item"><div class="label">${t('cost')}</div><div class="value"><strong>${fmt.cost(d.cost_usd)}</strong></div></div>
+    </div>
+
+    ${d.rounds_count > 1 ? `
+    <div class="section-title">Tool-call rounds</div>
+    <table class="rounds-table">
+      <thead><tr><th>#</th><th>Time</th><th>Provider</th><th>In</th><th>Out</th><th>Reason</th><th>Cost</th><th>Latency</th></tr></thead>
+      <tbody>${d.rounds.map((r,i) => `<tr>
+        <td>${i+1}</td>
+        <td>${fmt.time(r.timestamp)}</td>
+        <td>${fmt.esc(r.provider_name||'')}</td>
+        <td>${fmt.num(r.input_tokens)}</td>
+        <td>${fmt.num(r.output_tokens)}</td>
+        <td>${fmt.num(r.reasoning_tokens||0)}</td>
+        <td>${fmt.cost(r.cost_usd)}</td>
+        <td>${fmt.num(r.generation_time_ms)} ms</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    ` : ''}
+
+    ${p.messages ? `
+    <div class="section-title">${t('userPrompt')}</div>
+    <pre class="codeblock">${fmt.esc(lastUserMsg)}</pre>
+
+    <div class="section-title">${t('fullContext')}</div>
+    <details class="context-block"><summary>${(p.messages||[]).length} ${t('messages')}</summary>
+      ${(p.messages||[]).map(m => `
+        <div class="ctx-msg">
+          <div class="ctx-role">${fmt.esc(m.role||'')}</div>
+          <div class="ctx-content">${fmt.formatContent(typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2))}</div>
+        </div>`).join('')}
+    </details>
+
+    <div class="section-title">${t('assistantResponse')}</div>
+    ${fmt.formatContent(p.response||'')}
+    ` : `<div class="empty" style="margin-top:24px">No prompt text captured (e.g. Image Studio request — only billing data tracked)</div>`}
+  `;
+  document.getElementById('detail-panel').classList.add('open');
+  document.getElementById('backdrop').classList.add('open');
+}
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('open');
+}
+document.getElementById('close-detail').onclick = closeDetail;
+document.getElementById('backdrop').onclick = closeDetail;
+
+// BY USER
+async function renderByUser() {
+  const data = await api('/api/stats/by-user?period=' + state.period);
+  const content = document.getElementById('content');
+  if (!data || !data.length) {
+    content.innerHTML = '<div class="table-wrap"><div class="empty">' + t('noData') + '</div></div>';
+    return;
+  }
+  content.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>${t('thUser')}</th><th>${t('thEmail')}</th><th>${t('thRequests')}</th><th>${t('thInput')}</th><th>${t('thOutput')}</th><th>${t('thTotalCost')}</th></tr></thead>
+    <tbody>${data.map(r=>`<tr>
+      <td>${fmt.esc(r.user_name||'')}</td>
+      <td>${fmt.esc(r.user_email||'')}</td>
+      <td>${fmt.num(r.requests)}</td>
+      <td>${fmt.num(r.input_tokens)}</td>
+      <td>${fmt.num(r.output_tokens)}</td>
+      <td>${fmt.cost(r.cost_usd)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// BY MODEL
+async function renderByModel() {
+  const data = await api('/api/stats/by-model?period=' + state.period);
+  const content = document.getElementById('content');
+  if (!data || !data.length) {
+    content.innerHTML = '<div class="table-wrap"><div class="empty">' + t('noData') + '</div></div>';
+    return;
+  }
+  content.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>${t('thModel')}</th><th>Provider</th><th>${t('thRequests')}</th><th>${t('thInput')}</th><th>${t('thOutput')}</th><th>${t('thTotalCost')}</th><th>${t('thAvgLatency')}</th></tr></thead>
+    <tbody>${data.map(r=>`<tr>
+      <td>${fmt.esc(r.model||'')}</td>
+      <td>${fmt.esc(r.provider_name||'')}</td>
+      <td>${fmt.num(r.requests)}</td>
+      <td>${fmt.num(r.input_tokens)}</td>
+      <td>${fmt.num(r.output_tokens)}</td>
+      <td>${fmt.cost(r.cost_usd)}</td>
+      <td>${(r.avg_generation_time_ms||0).toFixed(0)} ms</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// Read initial page from URL hash (e.g. #logs, #users, #models)
+const _initHash = (location.hash || '').replace('#','').toLowerCase();
+if (['logs','users','models','dashboard'].includes(_initHash)) {
+  state.page = _initHash;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === state.page));
+  document.getElementById('page-title').textContent = t({dashboard:'dashboard',logs:'logs',users:'users',models:'models'}[state.page]);
+}
+applyLang();
+render();
+</script>
+</body>
+</html>
