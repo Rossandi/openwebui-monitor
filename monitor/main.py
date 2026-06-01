@@ -293,6 +293,9 @@ def _attach_prompt_by_hash(db: Session, msg_hash: Optional[str]) -> Optional[Pro
 
 
 def _serialize_round(r: ReqModel) -> dict:
+    # Prefer native_tokens_* — these are what OpenRouter Activity shows
+    # and what providers actually bill. tokens_prompt/completion are
+    # OpenAI-normalized and don't match upstream reports.
     return {
         "id": r.id,
         "generation_id": r.generation_id,
@@ -300,8 +303,8 @@ def _serialize_round(r: ReqModel) -> dict:
         "model": r.model,
         "provider_name": r.provider_name,
         "api_type": r.api_type,
-        "input_tokens": r.tokens_prompt or 0,
-        "output_tokens": r.tokens_completion or 0,
+        "input_tokens": r.native_tokens_prompt or r.tokens_prompt or 0,
+        "output_tokens": r.native_tokens_completion or r.tokens_completion or 0,
         "reasoning_tokens": r.native_tokens_reasoning or 0,
         "cost_usd": r.total_cost or 0.0,
         "generation_time_ms": r.generation_time or 0,
@@ -396,8 +399,8 @@ def api_logs(
         msg_hash = prompt.user_msg_hash or ""
         chat_id = prompt.chat_id or ""
 
-        total_in = sum(r.tokens_prompt or 0 for r in rounds)
-        total_out = sum(r.tokens_completion or 0 for r in rounds)
+        total_in = sum((r.native_tokens_prompt or r.tokens_prompt or 0) for r in rounds)
+        total_out = sum((r.native_tokens_completion or r.tokens_completion or 0) for r in rounds)
         total_reasoning = sum(r.native_tokens_reasoning or 0 for r in rounds)
         total_cost = sum(r.total_cost or 0.0 for r in rounds)
         total_gen_time = sum(r.generation_time or 0 for r in rounds)
@@ -466,8 +469,8 @@ def api_logs(
                 "user_name": "",
                 "chat_id": "",
                 "rounds_count": 1,
-                "input_tokens": r.tokens_prompt or 0,
-                "output_tokens": r.tokens_completion or 0,
+                "input_tokens": r.native_tokens_prompt or r.tokens_prompt or 0,
+                "output_tokens": r.native_tokens_completion or r.tokens_completion or 0,
                 "reasoning_tokens": r.native_tokens_reasoning or 0,
                 "cost_usd": round(r.total_cost or 0.0, 6),
                 "generation_time_ms": r.generation_time or 0,
@@ -528,8 +531,8 @@ def api_log_detail(group_key: str, db: Session = Depends(get_db)):
         if not rounds:
             raise HTTPException(404)
 
-    total_in = sum(r.tokens_prompt or 0 for r in rounds)
-    total_out = sum(r.tokens_completion or 0 for r in rounds)
+    total_in = sum((r.native_tokens_prompt or r.tokens_prompt or 0) for r in rounds)
+    total_out = sum((r.native_tokens_completion or r.tokens_completion or 0) for r in rounds)
     total_reasoning = sum(r.native_tokens_reasoning or 0 for r in rounds)
     total_cost = sum(r.total_cost or 0.0 for r in rounds)
 
