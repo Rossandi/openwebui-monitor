@@ -1,18 +1,28 @@
 """
 title: OpenRouter Image Studio
-version: 0.4
-description: Универсальный Pipe для генерации и редактирования изображений через OpenRouter. Multi-image input, контроль размера/aspect, форсирование image output. v0.4: добавлен OPENROUTER_BASE_URL для возможности прохождения через Monitor-прокси.
+version: 0.5
+description: Универсальный Pipe для генерации и редактирования изображений через OpenRouter. Multi-image input, контроль размера/aspect, форсирование image output. v0.4: OPENROUTER_BASE_URL для проксирования через Monitor. v0.5: attribution в Monitor /api/ingest_text — каждая картинка имеет user_email и preview промта в дашборде.
 author: ROSS
 """
 
 import base64
+import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel, Field
+
+
+def _fingerprint(text: str) -> str:
+    """SHA1[:16] of the last user message. MUST match monitor.proxy.fingerprint_user_msg
+    and monitor_function.py — that's how Monitor links Prompt rows to Request rows."""
+    if not text:
+        return "no-user-msg"
+    return hashlib.sha1(text.strip().encode("utf-8")).hexdigest()[:16]
 
 
 class Pipe:
@@ -42,6 +52,14 @@ class Pipe:
         OPENWEBUI_BASE_URL: str = Field(
             default="http://localhost:8080",
             description="Open WebUI internal URL",
+        )
+
+        # URL Monitor для записи промта/ответа (attribution в дашборде).
+        # Если пусто или Monitor недоступен — биллинг всё равно учтётся через
+        # прокси, просто без email и текста промта в Журнале.
+        MONITOR_URL: str = Field(
+            default="http://monitor:8088",
+            description="Monitor URL for prompt/response attribution. Empty = disable.",
         )
 
         # Таймауты на генерацию и сохранение файлов.
@@ -342,6 +360,45 @@ class Pipe:
             return [{"role": "user", "content": content}]
         return [{"role": "user", "content": prompt}]
 
+    async def _report_to_monitor(
+        self,
+        messages: list,
+        response_text: str,
+        prompt_text: str,
+        chat_id: str,
+        user: Optional[dict],
+    ) -> None:
+        """
+        Send prompt/response text to Monitor for dashboard attribution.
+
+        Mirrors monitor_function.py outlet payload. Silent on failure — never
+        breaks image generation. The proxy already captured the billing data;
+        this is purely the human-readable layer.
+        """
+        if not self.valves.MONITOR_URL:
+            return
+        u = user if isinstance(user, dict) else {}
+        payload = {
+            "chat_id": chat_id or "",
+            "user_id": str(u.get("id") or ""),
+            "user_name": str(u.get("name") or ""),
+            "user_email": str(u.get("email") or ""),
+            "model_hint": self.valves.MODEL,
+            "messages": messages,
+            "response": response_text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_msg_hash": _fingerprint(prompt_text),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
+                    self.valves.MONITOR_URL.rstrip("/") + "/api/ingest_text",
+                    json=payload,
+                )
+        except Exception:
+            # Silent — Monitor unreachable should never block image generation.
+            pass
+
     def _short_debug_json(self, data: Any) -> str:
         try:
             text = json.dumps(data, ensure_ascii=False, indent=2)
@@ -541,5 +598,18 @@ class Pipe:
             f"\n\n_Режим: `{source_mode}` · Модель: `{self.valves.MODEL}`"
             f" · референсов: {refs_count}{config_summary}_"
         )
+
+        # Attribution → Monitor (v0.5). Silent on failure.
+        try:
+            chat_id = (body or {}).get("chat_id") or (body or {}).get("id") or ""
+            await self._report_to_monitor(
+                messages=messages,
+                response_text=result,
+                prompt_text=prompt,
+                chat_id=str(chat_id),
+                user=__user__,
+            )
+        except Exception:
+            pass
 
         return result

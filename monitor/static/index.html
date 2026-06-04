@@ -521,6 +521,7 @@ async function renderLogs() {
       <input type="text" id="f-search" placeholder="${t('searchPlaceholder')}" value="${fmt.esc(f.search)}" style="flex:1; min-width:200px;">
       <button class="btn" id="f-apply">${t('apply')}</button>
       <button class="btn" id="f-reset">${t('reset')}</button>
+      <button class="btn" id="f-export" title="Export visible turns to CSV">⬇ CSV</button>
     </div>
     <div class="table-wrap" id="logs-table"></div>
   `;
@@ -536,6 +537,13 @@ async function renderLogs() {
   document.getElementById('f-reset').onclick = () => {
     state.logFilters = { page: 1, limit: 50, user_email: '', model: '', search: '', date_from: '', date_to: '' };
     renderLogs();
+  };
+  document.getElementById('f-export').onclick = () => {
+    const params = new URLSearchParams({ period: state.period });
+    if (f.user_email) params.set('user_email', f.user_email);
+    if (f.model) params.set('model', f.model);
+    // Browser handles download via Content-Disposition header
+    window.location.href = '/api/logs.csv?' + params.toString();
   };
   loadLogs();
 }

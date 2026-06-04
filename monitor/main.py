@@ -583,6 +583,138 @@ def api_health(db: Session = Depends(get_db)):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/api/logs.csv")
+def api_logs_csv(
+    period: Optional[str] = "all",
+    user_email: Optional[str] = None,
+    model: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """CSV export — one row per LOGICAL turn (matches Journal view).
+    Pulls aggregated turns via the same grouping logic as /api/logs."""
+    import csv
+    from io import StringIO
+    from fastapi.responses import StreamingResponse
+
+    # Fetch a big page (cap at 5000 turns — plenty for any month of data)
+    q = db.query(ReqModel).filter(ReqModel.sync_status == "synced")
+    if model:
+        q = q.filter(ReqModel.model == model)
+    cutoff = period_cutoff(period)
+    if cutoff is not None:
+        q = q.filter(ReqModel.created_at >= cutoff)
+    all_requests = q.order_by(ReqModel.created_at.desc()).limit(20000).all()
+
+    pq = db.query(Prompt).order_by(Prompt.created_at.desc())
+    if user_email:
+        pq = pq.filter(Prompt.user_email == user_email)
+    if cutoff is not None:
+        pq = pq.filter(Prompt.created_at >= cutoff)
+    all_prompts = pq.limit(10000).all()
+
+    WINDOW_BEFORE = timedelta(seconds=60)
+    WINDOW_AFTER = timedelta(seconds=90)
+    claimed: set[int] = set()
+    rows: list[dict] = []
+
+    for prompt in all_prompts:
+        if not prompt.created_at:
+            continue
+        win_lo = prompt.created_at - WINDOW_BEFORE
+        win_hi = prompt.created_at + WINDOW_AFTER
+        matched = [
+            r for r in all_requests
+            if r.id not in claimed and r.created_at and (
+                (win_lo <= r.created_at <= win_hi)
+                or (prompt.user_msg_hash
+                    and r.external_user
+                    and r.external_user.strip() == prompt.user_msg_hash.strip())
+            )
+        ]
+        if not matched:
+            continue
+        for r in matched:
+            claimed.add(r.id)
+
+        # last user message
+        prompt_text = ""
+        try:
+            msgs = json.loads(prompt.messages_json or "[]")
+            for m in reversed(msgs):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    c = m.get("content")
+                    if isinstance(c, str):
+                        prompt_text = c
+                        break
+                    if isinstance(c, list):
+                        prompt_text = "\n".join(
+                            p.get("text", "") for p in c if isinstance(p, dict)
+                        )
+                        break
+        except Exception:
+            pass
+
+        rows.append({
+            "timestamp": prompt.created_at.isoformat(),
+            "user_email": prompt.user_email or "",
+            "user_name": prompt.user_name or "",
+            "model": matched[0].model or "",
+            "providers": "; ".join(sorted({r.provider_name for r in matched if r.provider_name})),
+            "rounds": len(matched),
+            "input_tokens": sum((r.native_tokens_prompt or r.tokens_prompt or 0) for r in matched),
+            "output_tokens": sum((r.native_tokens_completion or r.tokens_completion or 0) for r in matched),
+            "reasoning_tokens": sum(r.native_tokens_reasoning or 0 for r in matched),
+            "cost_usd": round(sum(r.total_cost or 0.0 for r in matched), 6),
+            "prompt": prompt_text.replace("\n", " ").replace("\r", " ")[:500],
+            "response": (prompt.response or "").replace("\n", " ").replace("\r", " ")[:500],
+        })
+
+    # Unlinked solo requests (Image Studio etc) — unless filtered by user
+    if not user_email:
+        for r in all_requests:
+            if r.id in claimed:
+                continue
+            rows.append({
+                "timestamp": r.created_at.isoformat() if r.created_at else "",
+                "user_email": "(unknown)",
+                "user_name": "",
+                "model": r.model or "",
+                "providers": r.provider_name or "",
+                "rounds": 1,
+                "input_tokens": r.native_tokens_prompt or r.tokens_prompt or 0,
+                "output_tokens": r.native_tokens_completion or r.tokens_completion or 0,
+                "reasoning_tokens": r.native_tokens_reasoning or 0,
+                "cost_usd": round(r.total_cost or 0.0, 6),
+                "prompt": "",
+                "response": "",
+            })
+
+    rows.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    # UTF-8 BOM so Excel opens cyrillic correctly
+    buf = StringIO()
+    buf.write("﻿")
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=[
+            "timestamp", "user_email", "user_name", "model", "providers", "rounds",
+            "input_tokens", "output_tokens", "reasoning_tokens", "cost_usd",
+            "prompt", "response",
+        ],
+        quoting=csv.QUOTE_ALL,
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    filename = f"owmonitor-logs-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ============================================================
 # 5. Static dashboard. Must be LAST — catch-all.
 # ============================================================
