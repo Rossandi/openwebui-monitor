@@ -599,13 +599,18 @@ class Pipe:
             f" · референсов: {refs_count}{config_summary}_"
         )
 
-        # Attribution → Monitor (v0.5). Silent on failure.
+        # Attribution → Monitor (v0.5).
+        # IMPORTANT: hash effective_prompt (with PROMPT_PREFIX), not the raw
+        # user text. The proxy fingerprints the messages it forwards upstream,
+        # and those include the prefix. Without this match the Prompt row
+        # never links to the Request row and the dashboard shows (unknown).
+        # Silent on failure — never block generation.
         try:
             chat_id = (body or {}).get("chat_id") or (body or {}).get("id") or ""
             await self._report_to_monitor(
                 messages=messages,
                 response_text=result,
-                prompt_text=prompt,
+                prompt_text=effective_prompt,
                 chat_id=str(chat_id),
                 user=__user__,
             )
