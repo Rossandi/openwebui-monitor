@@ -63,9 +63,22 @@ services:
     volumes:
       - open-webui-data:/app/backend/data
       - ./templates:/app/backend/data/templates:ro
+    # Soft coupling: open-webui starts as soon as the monitor *container*
+    # is up (service_started), NOT after its healthcheck passes. This
+    # avoids a deadlock where a broken monitor (bad .env, sync worker
+    # crash, disk full) would freeze the chat forever. Trade-off: the
+    # first 5–15 seconds after a cold start may return 502 from proxy
+    # while monitor finishes its FastAPI boot; OpenWebUI retries
+    # transparently in the browser, users see a momentary "loading".
+    #
+    # Runtime resilience comes from:
+    #   - monitor's restart: unless-stopped + healthcheck (Docker auto-restarts)
+    #   - documented Plan B in MIGRATION_GUIDE.md §7 (switch Connections
+    #     URL back to https://openrouter.ai/api/v1 — chat works without
+    #     monitor, accounting stops until monitor is restored).
     depends_on:
       monitor:
-        condition: service_healthy
+        condition: service_started
       jupyter:
         condition: service_started
     networks:
