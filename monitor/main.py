@@ -505,7 +505,7 @@ def api_logs(
 
     # 2) Fetch all Prompts in the same window so linkage works.
     lo, hi = date_bounds(period, date_from, date_to)
-    pq = db.query(Prompt).order_by(Prompt.created_at.desc()).limit(2000)
+    pq = db.query(Prompt)
     if user_email:
         pq = pq.filter(Prompt.user_email == user_email)
     if lo is not None:
@@ -513,7 +513,7 @@ def api_logs(
         pq = pq.filter(Prompt.created_at >= lo - timedelta(minutes=2))
     if hi is not None:
         pq = pq.filter(Prompt.created_at <= hi + timedelta(minutes=2))
-    all_prompts = pq.all()
+    all_prompts = pq.order_by(Prompt.created_at.desc()).limit(2000).all()
 
     # 3) Greedy assignment, newest Prompt first.
     #    OpenWebUI fires several API calls per user turn: search-classifier,
@@ -765,14 +765,14 @@ def api_logs_csv(
     all_requests = q.order_by(ReqModel.created_at.desc()).limit(20000).all()
 
     lo, hi = date_bounds(period, date_from, date_to)
-    pq = db.query(Prompt).order_by(Prompt.created_at.desc())
+    pq = db.query(Prompt)
     if user_email:
         pq = pq.filter(Prompt.user_email == user_email)
     if lo is not None:
         pq = pq.filter(Prompt.created_at >= lo - timedelta(minutes=2))
     if hi is not None:
         pq = pq.filter(Prompt.created_at <= hi + timedelta(minutes=2))
-    all_prompts = pq.limit(10000).all()
+    all_prompts = pq.order_by(Prompt.created_at.desc()).limit(10000).all()
 
     WINDOW_BEFORE = timedelta(seconds=60)
     WINDOW_AFTER = timedelta(seconds=90)

@@ -336,7 +336,7 @@ const i18n = {
     darkMode: '☾ Dark mode', lightMode: '☀ Light mode',
     totalRequests: 'Total Requests', totalTokens: 'Total Tokens',
     estimatedCost: 'Estimated Cost', activeUsers: 'Active Users',
-    reqPerDay: 'Requests per day (30d)', tokPerDay: 'Tokens per day (30d)',
+    reqPerDay: 'Requests', tokPerDay: 'Tokens',
     chartReq: 'Requests', chartInput: 'Input', chartOutput: 'Output',
     allUsers: 'All users', allModels: 'All models', searchPlaceholder: 'Search prompts/responses...',
     apply: 'Apply', reset: 'Reset',
@@ -360,7 +360,7 @@ const i18n = {
     darkMode: '☾ Тёмная тема', lightMode: '☀ Светлая тема',
     totalRequests: 'Всего запросов', totalTokens: 'Всего токенов',
     estimatedCost: 'Стоимость', activeUsers: 'Активных пользователей',
-    reqPerDay: 'Запросов в день (30д)', tokPerDay: 'Токенов в день (30д)',
+    reqPerDay: 'Запросы', tokPerDay: 'Токены',
     chartReq: 'Запросы', chartInput: 'Входящие', chartOutput: 'Исходящие',
     allUsers: 'Все пользователи', allModels: 'Все модели', searchPlaceholder: 'Поиск по промтам/ответам...',
     apply: 'Применить', reset: 'Сбросить',
@@ -623,9 +623,18 @@ function drawChart(id, labels, datasets) {
   const grid = css.getPropertyValue('--grid').trim();
   const accent = css.getPropertyValue('--accent').trim();
   const palette = [accent, '#8b5cf6'];
+  // Adaptive markers: with very few points, a line is invisible — show fat
+  // dots; with many points the line carries the shape and dots would clutter.
+  const n = labels.length;
+  const pointRadius = n <= 1 ? 7 : (n <= 7 ? 4 : 0);
+  const pointHoverRadius = n <= 1 ? 9 : (n <= 7 ? 6 : 4);
   const cfgDatasets = datasets.map((d,i) => ({
     label: d.label, data: d.data, borderColor: palette[i%palette.length],
-    backgroundColor: 'transparent', tension: 0.35, pointRadius: 0, borderWidth: 2,
+    backgroundColor: palette[i%palette.length],
+    tension: 0.35,
+    pointRadius, pointHoverRadius,
+    pointBackgroundColor: palette[i%palette.length],
+    borderWidth: 2,
   }));
   if (state.charts[id]) state.charts[id].destroy();
   state.charts[id] = new Chart(ctx, {
