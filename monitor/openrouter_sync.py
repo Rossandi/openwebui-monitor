@@ -48,11 +48,22 @@ WORKER_CONCURRENCY = 4
 
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO 8601 timestamp into a UTC-naive datetime.
+
+    Critical: returning a tz-aware datetime would let psycopg2 silently
+    convert it into the container's local timezone before writing into a
+    TIMESTAMP WITHOUT TIME ZONE column — which then double-shifts in the
+    UI (UTC→MSK on save, then MSK→MSK+3 on render). Normalize to UTC and
+    strip tzinfo here so the DB always stores plain UTC.
+    """
     if not s:
         return None
     try:
         # OpenRouter format: "2026-05-27T16:21:25.123456+00:00"
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
     except Exception:
         return None
 
@@ -85,7 +96,7 @@ def upsert_request(db: Session, data: dict, generation_id: str) -> None:
     values = {
         "generation_id": generation_id,
         "request_id": data.get("request_id"),
-        "created_at": _parse_iso(data.get("created_at")) or datetime.now(timezone.utc),
+        "created_at": _parse_iso(data.get("created_at")) or datetime.utcnow(),
         "model": data.get("model"),
         "model_permaslug": data.get("model_permaslug"),
         "provider_name": data.get("provider_name"),
@@ -129,7 +140,7 @@ def mark_failed(db: Session, generation_id: str, error: str, attempts: int) -> N
     """Record a failed generation so we have audit trail."""
     stmt = pg_insert(Request).values(
         generation_id=generation_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
         sync_status="failed",
         sync_attempts=attempts,
         sync_error=error[:1000],
