@@ -144,6 +144,7 @@ async def api_ingest_legacy(req: FastAPIRequest):
 # ============================================================
 
 def period_cutoff(period: Optional[str]) -> Optional[datetime]:
+    """Shortcut periods. None means «no lower bound»."""
     now = datetime.utcnow()
     if not period or period == "all":
         return None
@@ -156,16 +157,62 @@ def period_cutoff(period: Optional[str]) -> Optional[datetime]:
     return None
 
 
-def apply_period(q, period):
-    cutoff = period_cutoff(period)
-    if cutoff is not None:
-        q = q.filter(ReqModel.created_at >= cutoff)
+def _parse_iso_date(s: Optional[str], end_of_day: bool = False) -> Optional[datetime]:
+    """Accept YYYY-MM-DD or full ISO. Returns None on bad input.
+    end_of_day=True means 23:59:59.999999 — useful for inclusive `date_to`."""
+    if not s:
+        return None
+    try:
+        # Try date-only first (YYYY-MM-DD)
+        if len(s) == 10 and s.count("-") == 2:
+            d = datetime.strptime(s, "%Y-%m-%d")
+            if end_of_day:
+                d = d.replace(hour=23, minute=59, second=59, microsecond=999999)
+            return d
+        # Full ISO (with optional Z)
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def date_bounds(
+    period: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    """Resolve user-supplied filters into a (lo, hi) datetime window.
+
+    Explicit date_from/date_to take precedence over shortcut period.
+    Either bound can be None (open-ended on that side)."""
+    lo = _parse_iso_date(date_from, end_of_day=False)
+    hi = _parse_iso_date(date_to, end_of_day=True)
+    if lo is None and hi is None:
+        # Fall back to shortcut period
+        lo = period_cutoff(period)
+    return lo, hi
+
+
+def apply_period(q, period, date_from=None, date_to=None):
+    """Filter a Request query by created_at."""
+    lo, hi = date_bounds(period, date_from, date_to)
+    if lo is not None:
+        q = q.filter(ReqModel.created_at >= lo)
+    if hi is not None:
+        q = q.filter(ReqModel.created_at <= hi)
     return q
 
 
 @app.get("/api/stats/summary")
-def stats_summary(period: Optional[str] = "all", db: Session = Depends(get_db)):
-    q = apply_period(db.query(ReqModel).filter(ReqModel.sync_status == "synced"), period)
+def stats_summary(
+    period: Optional[str] = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = apply_period(
+        db.query(ReqModel).filter(ReqModel.sync_status == "synced"),
+        period, date_from, date_to,
+    )
     total_requests = q.count()
     agg = q.with_entities(
         func.coalesce(func.sum(ReqModel.tokens_prompt), 0),
@@ -185,9 +232,17 @@ def stats_summary(period: Optional[str] = "all", db: Session = Depends(get_db)):
 
 
 @app.get("/api/stats/by-user")
-def stats_by_user(period: Optional[str] = "all", db: Session = Depends(get_db)):
+def stats_by_user(
+    period: Optional[str] = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """Group by Prompt.user_email via user_msg_hash echoed in external_user."""
-    q = apply_period(db.query(ReqModel).filter(ReqModel.sync_status == "synced"), period)
+    q = apply_period(
+        db.query(ReqModel).filter(ReqModel.sync_status == "synced"),
+        period, date_from, date_to,
+    )
     rows = q.with_entities(
         ReqModel.external_user,
         ReqModel.tokens_prompt,
@@ -222,8 +277,16 @@ def stats_by_user(period: Optional[str] = "all", db: Session = Depends(get_db)):
 
 
 @app.get("/api/stats/by-model")
-def stats_by_model(period: Optional[str] = "all", db: Session = Depends(get_db)):
-    q = apply_period(db.query(ReqModel).filter(ReqModel.sync_status == "synced"), period)
+def stats_by_model(
+    period: Optional[str] = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = apply_period(
+        db.query(ReqModel).filter(ReqModel.sync_status == "synced"),
+        period, date_from, date_to,
+    )
     q = q.with_entities(
         ReqModel.model,
         ReqModel.provider_name,
@@ -248,8 +311,45 @@ def stats_by_model(period: Optional[str] = "all", db: Session = Depends(get_db))
 
 
 @app.get("/api/stats/timeline")
-def stats_timeline(days: int = 30, db: Session = Depends(get_db)):
-    cutoff = datetime.utcnow() - timedelta(days=days)
+def stats_timeline(
+    days: int = 30,
+    period: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Timeline with adaptive bucketing.
+
+    Mode resolution (precedence):
+      1. Explicit date_from + date_to  → window between them
+      2. period (today/week/month/all) → standard cutoff
+      3. days (legacy)                 → last N days
+
+    Bucket size:
+      - ≤ 60 days  → daily
+      - 61–365     → weekly
+      - >365       → monthly
+    """
+    now = datetime.utcnow()
+    lo, hi = date_bounds(period, date_from, date_to)
+    if lo is None and hi is None:
+        # Legacy default: last `days` days
+        lo = now - timedelta(days=max(1, min(days, 365 * 5)))
+        hi = now
+    elif hi is None:
+        hi = now
+    elif lo is None:
+        # date_to only — open lower bound; cap to a year before hi for sanity
+        lo = hi - timedelta(days=365)
+
+    span_days = max(1, (hi - lo).days + 1)
+    if span_days <= 60:
+        bucket = "day"
+    elif span_days <= 365:
+        bucket = "week"
+    else:
+        bucket = "month"
+
     rows = (
         db.query(
             cast(ReqModel.created_at, Date).label("d"),
@@ -258,20 +358,68 @@ def stats_timeline(days: int = 30, db: Session = Depends(get_db)):
             func.coalesce(func.sum(ReqModel.tokens_completion), 0),
             func.coalesce(func.sum(ReqModel.total_cost), 0.0),
         )
-        .filter(ReqModel.created_at >= cutoff, ReqModel.sync_status == "synced")
+        .filter(ReqModel.created_at >= lo)
+        .filter(ReqModel.created_at <= hi)
+        .filter(ReqModel.sync_status == "synced")
         .group_by("d")
         .order_by("d")
         .all()
     )
-    by_day = {str(r[0]): (int(r[1]), int(r[2] or 0), int(r[3] or 0), float(r[4] or 0.0)) for r in rows}
+    by_day = {
+        str(r[0]): (int(r[1]), int(r[2] or 0), int(r[3] or 0), float(r[4] or 0.0))
+        for r in rows
+    }
+
+    def bucket_start(d: datetime) -> datetime:
+        if bucket == "day":
+            return d.replace(hour=0, minute=0, second=0, microsecond=0)
+        if bucket == "week":
+            # ISO week — Monday start
+            return (d - timedelta(days=d.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        # month
+        return d.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def bucket_next(d: datetime) -> datetime:
+        if bucket == "day":
+            return d + timedelta(days=1)
+        if bucket == "week":
+            return d + timedelta(days=7)
+        # month: jump to first of next month
+        if d.month == 12:
+            return d.replace(year=d.year + 1, month=1)
+        return d.replace(month=d.month + 1)
+
+    # Aggregate per-bucket. Daily data is already per-day; weekly/monthly
+    # we re-aggregate from the per-day result.
+    cur = bucket_start(lo)
+    end = bucket_start(hi)
     out = []
-    for i in range(days):
-        d = (cutoff + timedelta(days=i)).strftime("%Y-%m-%d")
-        c, in_t, out_t, cost = by_day.get(d, (0, 0, 0, 0.0))
+    while cur <= end:
+        nxt = bucket_next(cur)
+        c = in_t = out_t = 0
+        cost = 0.0
+        # walk per-day entries that fall in this bucket
+        day = cur
+        while day < nxt:
+            entry = by_day.get(day.strftime("%Y-%m-%d"))
+            if entry:
+                ec, ein, eout, ecost = entry
+                c += ec
+                in_t += ein
+                out_t += eout
+                cost += ecost
+            day += timedelta(days=1)
         out.append({
-            "date": d, "requests": c, "input_tokens": in_t, "output_tokens": out_t, "cost_usd": cost,
+            "date": cur.strftime("%Y-%m-%d"),
+            "requests": c,
+            "input_tokens": in_t,
+            "output_tokens": out_t,
+            "cost_usd": round(cost, 6),
         })
-    return out
+        cur = nxt
+    return {"bucket": bucket, "items": out}
 
 
 # ============================================================
@@ -321,6 +469,9 @@ def api_logs(
     user_email: Optional[str] = None,
     model: Optional[str] = None,
     search: Optional[str] = None,
+    period: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -344,16 +495,24 @@ def api_logs(
     page = max(1, page)
     limit = max(1, min(200, limit))
 
-    # 1) Fetch all candidate Requests (recent first, cap defensively)
+    # 1) Fetch all candidate Requests (recent first, cap defensively).
+    #    Date filter is applied via apply_period for consistency with /api/stats/*.
     q = db.query(ReqModel).filter(ReqModel.sync_status == "synced")
     if model:
         q = q.filter(ReqModel.model == model)
+    q = apply_period(q, period, date_from, date_to)
     all_requests = q.order_by(ReqModel.created_at.desc()).limit(5000).all()
 
-    # 2) Fetch all Prompts (recent first)
+    # 2) Fetch all Prompts in the same window so linkage works.
+    lo, hi = date_bounds(period, date_from, date_to)
     pq = db.query(Prompt).order_by(Prompt.created_at.desc()).limit(2000)
     if user_email:
         pq = pq.filter(Prompt.user_email == user_email)
+    if lo is not None:
+        # Prompts may arrive slightly after requests; expand window by 2 min.
+        pq = pq.filter(Prompt.created_at >= lo - timedelta(minutes=2))
+    if hi is not None:
+        pq = pq.filter(Prompt.created_at <= hi + timedelta(minutes=2))
     all_prompts = pq.all()
 
     # 3) Greedy assignment, newest Prompt first.
@@ -586,6 +745,8 @@ def api_health(db: Session = Depends(get_db)):
 @app.get("/api/logs.csv")
 def api_logs_csv(
     period: Optional[str] = "all",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     user_email: Optional[str] = None,
     model: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -596,20 +757,21 @@ def api_logs_csv(
     from io import StringIO
     from fastapi.responses import StreamingResponse
 
-    # Fetch a big page (cap at 5000 turns — plenty for any month of data)
+    # Fetch a big page (cap at 20000 turns — plenty for any month of data).
     q = db.query(ReqModel).filter(ReqModel.sync_status == "synced")
     if model:
         q = q.filter(ReqModel.model == model)
-    cutoff = period_cutoff(period)
-    if cutoff is not None:
-        q = q.filter(ReqModel.created_at >= cutoff)
+    q = apply_period(q, period, date_from, date_to)
     all_requests = q.order_by(ReqModel.created_at.desc()).limit(20000).all()
 
+    lo, hi = date_bounds(period, date_from, date_to)
     pq = db.query(Prompt).order_by(Prompt.created_at.desc())
     if user_email:
         pq = pq.filter(Prompt.user_email == user_email)
-    if cutoff is not None:
-        pq = pq.filter(Prompt.created_at >= cutoff)
+    if lo is not None:
+        pq = pq.filter(Prompt.created_at >= lo - timedelta(minutes=2))
+    if hi is not None:
+        pq = pq.filter(Prompt.created_at <= hi + timedelta(minutes=2))
     all_prompts = pq.limit(10000).all()
 
     WINDOW_BEFORE = timedelta(seconds=60)
